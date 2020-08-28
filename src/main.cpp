@@ -260,14 +260,14 @@ int main(int argc, char **argv)
 
     const auto col = 1.0F;
     glColor4f(col, col, col, 0.2F);
-    for (auto point1 : v_points) {
+    for (const auto point1 : v_points) {
       if (mouse) {
         double xpos = 0.0;
         double ypos = 0.0;
         glfwGetCursorPos(window, &xpos, &ypos);
         Point point{ static_cast<float>(xpos),
           static_cast<float>(screen_height) - static_cast<float>(ypos) };
-        if (auto dist = distance(point1, point); dist < max_distance) {
+        if (const auto dist = distance(point1, point); dist < max_distance) {
           glBegin(GL_LINES);
           glVertex2f(point1.x, point1.y);
           glVertex2f(point.x, point.y);
@@ -276,8 +276,8 @@ int main(int argc, char **argv)
       }
 
 
-      for (auto point2 : v_points) {
-        if (auto dist = distance(point1, point2); dist != 0.0F && dist < max_distance) {
+      for (const auto point2 : v_points) {
+        if (const auto dist = distance(point1, point2); dist != 0.0F && dist < max_distance) {
           glColor4f(lc.r, lc.g, lc.b, fade ? (max_distance - dist) / (max_distance * 2.0F) : 0.5F);
           glBegin(GL_LINES);
           glVertex2f(point1.x, point1.y);
