@@ -31,7 +31,7 @@ static const char USAGE[] =
       --hspeed=<s>  Dots maximum speed [default: 2.0].
       --bcolor=<c>  Background color [default: 000000].
       --dcolor=<c>  Dot color [default: FFFFFF].
-      --lcolor=<c>  Line color [defualt: FFFFFF].
+      --lcolor=<c>  Line color [default: FFFFFF].
       --dsize=<s>   Dot size [default: 4.0].
       --lwidth=<w>  Line width [default: 0.05].
       --fade        Lines fade in as the dots gets closer.
