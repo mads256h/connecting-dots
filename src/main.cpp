@@ -3,27 +3,66 @@
 
 #include <vector>
 #include <random>
+#include <chrono>
+#include <map>
+#include <string>
 
+#include <cstdlib>
 #include <cmath>
 
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 480
+#include <docopt/docopt.h>
 
-int screen_width = SCREEN_WIDTH;
-int screen_height = SCREEN_HEIGHT;
 
-const float max_distance = 200.0f;
+static const char USAGE[] =
+  R"(Connecting dots.
+
+    Usage:
+      connecting-dots [options]
+      connecting-dots (-h | --help)
+      connecting-dots --version
+
+    Options:
+      -h --help     Show this screen.
+      --version     Show version.
+      --width=<w>   Width of the window [default: 640].
+      --height=<h>  Height of the window [default: 480].
+      --amount=<n>  Amount of dots [default: 100].
+      --lspeed=<s>  Dots minimum speed [default: 0.0].
+      --hspeed=<s>  Dots maximum speed [default: 2.0].
+      --bcolor=<c>  Background color [default: 000000].
+      --dcolor=<c>  Dot color [default: FFFFFF].
+      --lcolor=<c>  Line color [defualt: FFFFFF].
+      --dsize=<s>   Dot size [default: 4.0].
+      --lwidth=<w>  Line width [default: 0.05].
+      --fade        Lines fade in as the dots gets closer.
+      --mouse       Lines connect to the mouse.
+      --audio       React to audio.
+      --fullscreen  Make the window fullscreen.
+)";
+
+int screen_width = 0;
+int screen_height = 0;
+
+const float max_distance = 200.0F;
 
 struct Point
 {
-  GLfloat x = 0.0f;
-  GLfloat y = 0.0f;
+  GLfloat x = 0.0F;
+  GLfloat y = 0.0F;
 };
 
 class MovingPoint
 {
 public:
-  MovingPoint(Point &_point, const GLfloat startx, const GLfloat starty, const float _speedx, const float _speedy, const bool _move_right, const bool _move_down) : point(_point), speedx(_speedx), speedy(_speedy), move_right(_move_right), move_down(_move_down)
+  MovingPoint(Point &_point,
+    const GLfloat startx,
+    const GLfloat starty,
+    const GLfloat _speedx,
+    const GLfloat _speedy,
+    const bool _move_right,
+    const bool _move_down)
+    : point(_point), speedx(_speedx), speedy(_speedy), move_right(_move_right),
+      move_down(_move_down)
   {
     point.x = startx;
     point.y = starty;
@@ -31,115 +70,167 @@ public:
 
   void update()
   {
-    if (move_right)
+    if (move_right) {
       point.x += speedx;
-    else
+    } else {
       point.x -= speedx;
+    }
 
-    if (move_down)
+    if (move_down) {
       point.y += speedy;
-    else
+    } else {
       point.y -= speedy;
+    }
 
-    if (move_right && point.x >= static_cast<float>(screen_width))
-      move_right = false;
-    if (!move_right && point.x <= 0.0f)
-      move_right = true;
+    if (move_right && point.x >= static_cast<float>(screen_width)) { move_right = false; }
+    if (!move_right && point.x <= 0.0F) { move_right = true; }
 
-    if (move_down && point.y >= static_cast<float>(screen_height))
-      move_down = false;
-    if (!move_down && point.y <= 0.0f)
-      move_down = true;
+    if (move_down && point.y >= static_cast<float>(screen_height)) { move_down = false; }
+    if (!move_down && point.y <= 0.0F) { move_down = true; }
   }
 
 private:
   Point &point;
 
 
-  float speedx = 0.0f;
-  float speedy = 0.0f;
+  GLfloat speedx = 0.0F;
+  GLfloat speedy = 0.0F;
 
   bool move_right = false;
   bool move_down = false;
 };
 
-float distance(const Point point1, const Point point2)
+struct rgb
 {
-  float xs = 0.0f;
-  float ys = 0.0f;
+  float r = 0.0F;
+  float g = 0.0F;
+  float b = 0.0F;
+};
 
-  xs = point2.x - point1.x;
-  xs = xs * xs;
-
-  ys = point2.y - point1.y;
-  ys = ys * ys;
-
-  return std::sqrt(xs + ys);
+constexpr rgb to_rgb(const unsigned int in)
+{
+  return rgb{
+  static_cast<float>(static_cast<std::byte>(in >> 8 * 0)) / 255.0f,
+  static_cast<float>(static_cast<std::byte>(in >> 8 * 1)) / 255.0f,
+  static_cast<float>(static_cast<std::byte>(in >> 8 * 2)) / 255.0f
+  };
 }
 
-int main(void)
+void initialize_projection()
 {
-  GLFWwindow *window;
+  glViewport(0.0F, 0.0F, screen_width, screen_height);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(0, screen_width, 0, screen_height, 0, 1);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+}
+
+[[nodiscard]] constexpr float distance(const Point point1, const Point point2)
+{
+  const GLfloat xs = point2.x - point1.x;
+  const GLfloat ys = point2.y - point1.y;
+
+  return std::sqrt(xs * xs + ys * ys);
+}
+
+int main(int argc, char **argv)
+{
+  const std::map<std::string, docopt::value> args =
+    docopt::docopt(USAGE, { argv + 1, argv + argc }, true, "Connecting dots 1.0");
+
+  screen_width = static_cast<int>(args.at("--width").asLong());
+  screen_height = static_cast<int>(args.at("--height").asLong());
+
+  const int amount = static_cast<int>(args.at("--amount").asLong());
+
+  const float max_speed = std::stof(args.at("--hspeed").asString());
+  const float min_speed = std::stof(args.at("--lspeed").asString());
+
+  const unsigned int background_color =
+    static_cast<unsigned int>(std::stoi(args.at("--bcolor").asString(), nullptr, 16));
+  const unsigned int dot_color =
+    static_cast<unsigned int>(std::stoi(args.at("--dcolor").asString(), nullptr, 16));
+  const unsigned int line_color =
+    static_cast<unsigned int>(std::stoi(args.at("--lcolor").asString(), nullptr, 16));
+
+  const rgb bc = to_rgb(background_color);
+  const rgb dc = to_rgb(dot_color);
+  const rgb lc = to_rgb(line_color);
+
+
+  const GLfloat dot_size = std::stof(args.at("--dsize").asString());
+  const GLfloat line_width = std::stof(args.at("--lwidth").asString());
+
+  const bool fade = args.at("--fade").asBool();
+  const bool mouse = args.at("--mouse").asBool();
+  // const bool audio = args.at("--audio").asBool();
+
+  const bool fullscreen = args.at("--fullscreen").asBool();
+
 
   // Initialize the library
-  if (!glfwInit()) {
-    return -1;
-  }
+  if (glfwInit() == GLFW_FALSE) { return EXIT_FAILURE; }
 
 
   glfwWindowHint(GLFW_SAMPLES, 4);
-  //glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-  //glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+  // glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+  // glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
 
 
   // Create a windowed mode window and its OpenGL context
-  window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Connecting dots", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(screen_width,
+    screen_height,
+    "Connecting dots",
+    fullscreen ? glfwGetPrimaryMonitor() : nullptr,
+    nullptr);
 
-  if (!window) {
+  if (window == nullptr) {
     glfwTerminate();
-    return -1;
+    return EXIT_FAILURE;
   }
 
   // Make the window's context current
   glfwMakeContextCurrent(window);
 
-  glfwSetWindowSizeCallback(window, [](GLFWwindow *, int width, int height) {
+  glfwSetWindowSizeCallback(window, [](GLFWwindow * /* unused */, int width, int height) {
     screen_width = width;
     screen_height = height;
-    glViewport(0.0f, 0.0f, screen_width, screen_height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, screen_width, 0, screen_height, 0, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+
+    initialize_projection();
   });
 
-  glViewport(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  glOrtho(0, SCREEN_WIDTH, 0, SCREEN_HEIGHT, 0, 1);
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
+  initialize_projection();
 
-  const int amount = 100;
 
-  std::mt19937 random;
+  const std::mt19937::result_type seed =
+    static_cast<std::mt19937::result_type>(std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::system_clock::now().time_since_epoch())
+                                             .count());
+
+  std::mt19937 random(seed);
   std::uniform_real_distribution<> distw(0, screen_width);
   std::uniform_real_distribution<> disth(0, screen_height);
 
-  std::uniform_real_distribution<> dists(0, 2);
+  std::uniform_real_distribution<> dists(min_speed, max_speed);
 
   std::uniform_int_distribution<> distb(0, 1);
 
 
   std::vector<Point> v_points;
-  v_points.reserve(amount);
+  v_points.reserve(static_cast<decltype(v_points)::size_type>(amount));
 
   std::vector<MovingPoint> v_moving_points;
-  v_moving_points.reserve(amount);
+  v_moving_points.reserve(static_cast<decltype(v_moving_points)::size_type>(amount));
 
   for (int i = 0; i < amount; i++) {
-    MovingPoint point(v_points.emplace_back(), static_cast<float>(distw(random)), static_cast<float>(disth(random)), static_cast<float>(dists(random)), static_cast<float>(dists(random)), distb(random), distb(random));
+    MovingPoint point(v_points.emplace_back(),
+      static_cast<float>(distw(random)),
+      static_cast<float>(disth(random)),
+      static_cast<float>(dists(random)),
+      static_cast<float>(dists(random)),
+      static_cast<bool>(distb(random)),
+      static_cast<bool>(distb(random)));
 
     v_moving_points.push_back(point);
   }
@@ -147,43 +238,47 @@ int main(void)
   glEnable(GL_BLEND);
   glEnable(GL_LINE_SMOOTH);
   glEnable(GL_POINT_SMOOTH);
-  glLineWidth(0.05f);
-  glPointSize(4);
+  glPointSize(dot_size);
+  glLineWidth(line_width);
+  glClearColor(bc.r, bc.g, bc.b, 1.0F);
+
 
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   // Loop until the user closes the window
-  while (!glfwWindowShouldClose(window)) {
+  while (glfwWindowShouldClose(window) == 0) {
 
-    for (auto &m_point : v_moving_points) {
-      m_point.update();
-    }
+    for (auto &m_point : v_moving_points) { m_point.update(); }
     glClear(GL_COLOR_BUFFER_BIT);
 
     // Render OpenGL here
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glColor4f(dc.r, dc.g, dc.b, 1.0F);
     glEnableClientState(GL_VERTEX_ARRAY);
     glVertexPointer(2, GL_FLOAT, 0, v_points.data());
     glDrawArrays(GL_POINTS, 0, amount);
     glDisableClientState(GL_VERTEX_ARRAY);
 
-    const auto col = 1.0f;
-    glColor4f(col, col, col, 0.2f);
+    const auto col = 1.0F;
+    glColor4f(col, col, col, 0.2F);
     for (auto point1 : v_points) {
-      double xpos, ypos;
-      glfwGetCursorPos(window, &xpos, &ypos);
-      Point point{ static_cast<float>(xpos), static_cast<float>(screen_height) - static_cast<float>(ypos) };
-      if (auto dist = distance(point1, point); dist < max_distance) {
-        glBegin(GL_LINES);
-        glVertex2f(point1.x, point1.y);
-        glVertex2f(point.x, point.y);
-        glEnd();
+      if (mouse) {
+        double xpos = 0.0;
+        double ypos = 0.0;
+        glfwGetCursorPos(window, &xpos, &ypos);
+        Point point{ static_cast<float>(xpos),
+          static_cast<float>(screen_height) - static_cast<float>(ypos) };
+        if (auto dist = distance(point1, point); dist < max_distance) {
+          glBegin(GL_LINES);
+          glVertex2f(point1.x, point1.y);
+          glVertex2f(point.x, point.y);
+          glEnd();
+        }
       }
 
 
       for (auto point2 : v_points) {
-        if (auto dist = distance(point1, point2); dist != 0.0f && dist < max_distance) {
-          glColor4f(1.0f, 1.0f, 1.0f, (max_distance - dist) / (max_distance * 2.0f));
+        if (auto dist = distance(point1, point2); dist != 0.0F && dist < max_distance) {
+          glColor4f(lc.r, lc.g, lc.b, fade ? (max_distance - dist) / (max_distance * 2.0F) : 0.5F);
           glBegin(GL_LINES);
           glVertex2f(point1.x, point1.y);
           glVertex2f(point2.x, point2.y);
@@ -202,5 +297,5 @@ int main(void)
 
   glfwTerminate();
 
-  return 0;
+  return EXIT_SUCCESS;
 }

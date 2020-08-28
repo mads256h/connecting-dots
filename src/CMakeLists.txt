@@ -6,4 +6,6 @@ target_link_libraries(
           project_warnings
 	  glfw
 	  GLEW
-	  GL)
+	  GL
+	  docopt)
+
