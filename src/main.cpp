@@ -6,14 +6,21 @@
 #include <chrono>
 #include <map>
 #include <string>
+#include <memory>
 
 #include <cstdlib>
 #include <cmath>
+#include <cstddef>
 
 #include <docopt/docopt.h>
 
+#ifdef ENABLE_PULSE
+#include <pulse/pulseaudio.h>
+#include "pulse.h"
+#endif
 
-static const char USAGE[] =
+
+static const char *const USAGE =
   R"(Connecting dots.
 
     Usage:
@@ -36,14 +43,19 @@ static const char USAGE[] =
       --lwidth=<w>  Line width [default: 0.05].
       --fade        Lines fade in as the dots gets closer.
       --mouse       Lines connect to the mouse.
-      --audio       React to audio.
       --fullscreen  Make the window fullscreen.
-)";
+      --trans       Make the window transparent.
+      --nodecor     Removes window decoration.
+)"
+#ifdef ENABLE_PULSE
+  "      --audio       React to audio.\n"
+#endif
+  ;
 
 int screen_width = 0;
 int screen_height = 0;
 
-const float max_distance = 200.0F;
+constexpr float max_distance = 200.0F * 200.0F;
 
 struct Point
 {
@@ -109,11 +121,10 @@ struct rgb
 
 constexpr rgb to_rgb(const unsigned int in)
 {
-  return rgb{
-  static_cast<float>(static_cast<std::byte>(in >> 8 * 0)) / 255.0f,
-  static_cast<float>(static_cast<std::byte>(in >> 8 * 1)) / 255.0f,
-  static_cast<float>(static_cast<std::byte>(in >> 8 * 2)) / 255.0f
-  };
+  return rgb{ static_cast<float>(static_cast<std::byte>(in >> 8U * 0U))
+                / static_cast<float>(UINT8_MAX),
+    static_cast<float>(static_cast<std::byte>(in >> 8U * 1U)) / static_cast<float>(UINT8_MAX),
+    static_cast<float>(static_cast<std::byte>(in >> 8U * 2U)) / static_cast<float>(UINT8_MAX) };
 }
 
 void initialize_projection()
@@ -131,7 +142,7 @@ void initialize_projection()
   const GLfloat xs = point2.x - point1.x;
   const GLfloat ys = point2.y - point1.y;
 
-  return std::sqrt(xs * xs + ys * ys);
+  return (xs * xs + ys * ys);
 }
 
 int main(int argc, char **argv)
@@ -164,9 +175,25 @@ int main(int argc, char **argv)
 
   const bool fade = args.at("--fade").asBool();
   const bool mouse = args.at("--mouse").asBool();
-  // const bool audio = args.at("--audio").asBool();
 
   const bool fullscreen = args.at("--fullscreen").asBool();
+  const bool transparent = args.at("--trans").asBool();
+  const bool no_decorations = args.at("--nodecor").asBool();
+
+#ifdef ENABLE_PULSE
+  const bool audio = args.at("--audio").asBool();
+
+  std::shared_ptr<pa_mainloop> mainloop(pa_mainloop_new(), pa_mainloop_free);
+  std::shared_ptr<pa_context> context(
+    pa_context_new(pa_mainloop_get_api(mainloop.get()), "Connecting dots"), pa_context_unref);
+
+  if (audio) {
+    pa_signal_init(pa_mainloop_get_api(mainloop.get()));
+
+    pa_context_set_state_callback(context.get(), context_state_callback, nullptr);
+    pa_context_connect(context.get(), nullptr, PA_CONTEXT_NOAUTOSPAWN, nullptr);
+  }
+#endif
 
 
   // Initialize the library
@@ -174,6 +201,10 @@ int main(int argc, char **argv)
 
 
   glfwWindowHint(GLFW_SAMPLES, 4);
+  glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, transparent ? GLFW_TRUE : GLFW_FALSE);
+  glfwWindowHint(GLFW_DECORATED, no_decorations ? GLFW_FALSE : GLFW_TRUE);
+  glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
+
   // glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   // glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
 
@@ -212,7 +243,7 @@ int main(int argc, char **argv)
   std::uniform_real_distribution<> distw(0, screen_width);
   std::uniform_real_distribution<> disth(0, screen_height);
 
-  std::uniform_real_distribution<> dists(min_speed, max_speed);
+  std::uniform_real_distribution<> dists(static_cast<double>(min_speed), static_cast<double>(max_speed));
 
   std::uniform_int_distribution<> distb(0, 1);
 
@@ -240,7 +271,7 @@ int main(int argc, char **argv)
   glEnable(GL_POINT_SMOOTH);
   glPointSize(dot_size);
   glLineWidth(line_width);
-  glClearColor(bc.r, bc.g, bc.b, 1.0F);
+  glClearColor(bc.r, bc.g, bc.b, 0.0F);
 
 
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -258,34 +289,40 @@ int main(int argc, char **argv)
     glDrawArrays(GL_POINTS, 0, amount);
     glDisableClientState(GL_VERTEX_ARRAY);
 
+#ifdef ENABLE_PULSE
+    const float lev = audio ? level * 1.25F : 1.0F;
+#else
+    const float lev = 1.0F;
+#endif
+
     const auto col = 1.0F;
     glColor4f(col, col, col, 0.2F);
+    glBegin(GL_LINES);
     for (const auto point1 : v_points) {
       if (mouse) {
         double xpos = 0.0;
         double ypos = 0.0;
         glfwGetCursorPos(window, &xpos, &ypos);
-        Point point{ static_cast<float>(xpos),
+        const Point point{ static_cast<float>(xpos),
           static_cast<float>(screen_height) - static_cast<float>(ypos) };
         if (const auto dist = distance(point1, point); dist < max_distance) {
-          glBegin(GL_LINES);
           glVertex2f(point1.x, point1.y);
           glVertex2f(point.x, point.y);
-          glEnd();
         }
       }
 
 
       for (const auto point2 : v_points) {
         if (const auto dist = distance(point1, point2); dist != 0.0F && dist < max_distance) {
-          glColor4f(lc.r, lc.g, lc.b, fade ? (max_distance - dist) / (max_distance * 2.0F) : 0.5F);
-          glBegin(GL_LINES);
+          glColor4f(
+            lc.r, lc.g, lc.b, (fade ? (max_distance - dist) / (max_distance * 2.0F) : 0.5F) * lev);
           glVertex2f(point1.x, point1.y);
           glVertex2f(point2.x, point2.y);
-          glEnd();
         }
       }
     }
+
+    glEnd();
 
 
     // Swap front and back buffers
@@ -293,6 +330,17 @@ int main(int argc, char **argv)
 
     // Poll for and process events
     glfwPollEvents();
+
+#ifdef ENABLE_PULSE
+    int retval = 0;
+    if (pa_mainloop_iterate(mainloop.get(), 0, &retval) < 0){
+      return retval;
+    }
+
+    if (audio){
+      level -= 0.032F;
+    }
+#endif
   }
 
   glfwTerminate();
